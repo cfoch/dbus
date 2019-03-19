@@ -1318,3 +1318,51 @@ bus_service_list_queued_owners (BusService *service,
   _dbus_list_clear (return_list);
   return FALSE;
 }
+
+dbus_bool_t
+bus_service_list_owned_services (BusService *service,
+                                 DBusList  **return_list)
+{
+  BusOwner *primary_owner;
+  const char *service_name;
+  DBusConnection *connection;
+  DBusList *services_owned, *link;
+
+  service_name = bus_service_get_name (service);
+  _dbus_assert (service_name != NULL);
+
+  if (*service_name != ':')
+    {
+      return TRUE;
+    }
+
+  primary_owner = bus_service_get_primary_owner (service);
+
+  if (primary_owner == NULL)
+    {
+      return FALSE;
+    }
+
+  services_owned = bus_connection_get_services_owned (primary_owner->conn);
+  link = _dbus_list_get_first_link (&services_owned);
+  _dbus_assert (link != NULL);
+
+  while (link != NULL)
+    {
+      BusService *ownee;
+      const char *uname;
+
+      ownee = (BusService *) link->data;
+      uname = bus_service_get_name (ownee);
+
+      if (!_dbus_list_append (return_list, (char *)uname))
+        goto oom;
+
+      link = _dbus_list_get_next_link (&services_owned, link);
+    }
+  return TRUE;
+
+ oom:
+  _dbus_list_clear (return_list);
+  return FALSE;
+}

@@ -100,6 +100,7 @@ void        bus_connection_remove_owned_service   (DBusConnection *connection,
 void        bus_connection_add_owned_service_link (DBusConnection *connection,
                                                    DBusList       *link);
 int         bus_connection_get_n_services_owned   (DBusConnection *connection);
+DBusList *  bus_connection_get_services_owned     (DBusConnection *connection);
 
 /* called by driver.c */
 dbus_bool_t bus_connection_complete (DBusConnection               *connection,

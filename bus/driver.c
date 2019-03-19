@@ -1452,6 +1452,115 @@ bus_driver_handle_remove_match (DBusConnection *connection,
 }
 
 static dbus_bool_t
+bus_driver_handle_get_service_ownees (DBusConnection *connection,
+				      BusTransaction *transaction,
+				      DBusMessage    *message,
+				      DBusError      *error)
+{
+  static const char dbus_service_name[] = DBUS_SERVICE_DBUS;
+
+  const char *text;
+  DBusList *base_names;
+  DBusList *link;
+  DBusString str;
+  BusRegistry *registry;
+  BusService *service;
+  DBusMessage *reply;
+  DBusMessageIter iter, array_iter;
+
+  _DBUS_ASSERT_ERROR_IS_CLEAR (error);
+
+  registry = bus_connection_get_registry (connection);
+
+  base_names = NULL;
+  text = NULL;
+  reply = NULL;
+
+  if (! dbus_message_get_args (message, error,
+			       DBUS_TYPE_STRING, &text,
+			       DBUS_TYPE_INVALID))
+      goto failed;
+
+  _dbus_string_init_const (&str, text);
+  service = bus_registry_lookup (registry, &str);
+  if (service == NULL &&
+      _dbus_string_equal_c_str (&str, DBUS_SERVICE_DBUS))
+    {
+      /* DBUS_SERVICE_DBUS owns itself */
+      if (! _dbus_list_append (&base_names, (char *) dbus_service_name))
+        goto oom;
+    }
+  else if (service == NULL)
+    {
+      dbus_set_error (error,
+                      DBUS_ERROR_NAME_HAS_NO_OWNER,
+                      "Could not get owners of name '%s': no such name", text);
+      goto failed;
+    }
+  else
+    {
+      if (!bus_service_list_owned_services (service, &base_names))
+        {
+          BUS_SET_OOM (error);
+          goto failed;
+        }
+    }
+
+  _dbus_assert (base_names != NULL);
+
+  reply = dbus_message_new_method_return (message);
+  if (reply == NULL)
+    goto oom;
+
+  dbus_message_iter_init_append (reply, &iter);
+  if (!dbus_message_iter_open_container (&iter,
+                                         DBUS_TYPE_ARRAY,
+                                         DBUS_TYPE_STRING_AS_STRING,
+                                         &array_iter))
+    goto oom;
+
+  link = _dbus_list_get_first_link (&base_names);
+  while (link != NULL)
+    {
+      char *uname;
+
+      _dbus_assert (link->data != NULL);
+      uname = (char *)link->data;
+
+      if (!dbus_message_iter_append_basic (&array_iter,
+                                           DBUS_TYPE_STRING,
+                                           &uname))
+        goto oom;
+
+      link = _dbus_list_get_next_link (&base_names, link);
+    }
+
+  if (! dbus_message_iter_close_container (&iter, &array_iter))
+    goto oom;
+
+
+  if (! bus_transaction_send_from_driver (transaction, connection, reply))
+    goto oom;
+
+  dbus_message_unref (reply);
+
+  return TRUE;
+
+ oom:
+  BUS_SET_OOM (error);
+
+ failed:
+  _DBUS_ASSERT_ERROR_IS_SET (error);
+  if (reply)
+    dbus_message_unref (reply);
+
+  if (base_names)
+    _dbus_list_clear (&base_names);
+
+  return FALSE;
+}
+
+static dbus_bool_t
 bus_driver_handle_get_service_owner (DBusConnection *connection,
 				     BusTransaction *transaction,
 				     DBusMessage    *message,
@@ -2506,6 +2615,11 @@ static const MessageHandler dbus_message_handlers[] = {
     DBUS_TYPE_STRING_AS_STRING,
     "",
     bus_driver_handle_remove_match,
+    METHOD_FLAG_ANY_PATH },
+  { "GetNameOwnees",
+    DBUS_TYPE_STRING_AS_STRING,
+    DBUS_TYPE_ARRAY_AS_STRING DBUS_TYPE_STRING_AS_STRING,
+    bus_driver_handle_get_service_ownees,
     METHOD_FLAG_ANY_PATH },
   { "GetNameOwner",
     DBUS_TYPE_STRING_AS_STRING,
